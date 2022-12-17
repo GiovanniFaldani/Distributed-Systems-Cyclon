@@ -1,7 +1,7 @@
 -module(server).
 
 -import(io,[fwrite/2, fwrite/1]).
--import(lists,[sum/1,nth/2, sort/1, sublist/2, append/2]).
+-import(lists,[sum/1,nth/2, sort/1, sublist/2, append/2, member/2]).
 -import(rand,[uniform/1, uniform/0]).
 -import(my_peer, [peer_execution/7, peer_init/2]).
 -import(utils, [shuffle_list/1, pick_L_elements/2, remove_pid_list/2, filter_list/2, index_elem/2, remove_duplicates/1]).
@@ -45,13 +45,13 @@ run(N) ->
     ShutDownList = [],
 
     start_n_peers(Children),
-    server_body(ServerList, Children, TotalTurns, ViewsPerTurn, PermaList, TurnSinceInactive, DiscoveredPerTurn, CurrentTurns).
+    server_body(ServerList, Children, TotalTurns, ViewsPerTurn, PermaList, ShutDownList, TurnSinceInactive, DiscoveredPerTurn, CurrentTurns).
 
 % main server loop
-server_body(ServerList, Children, TotalTurns, ViewsPerTurn, PermaList, TurnSinceInactive, DiscoveredPerTurn, CurrentTurns) ->
+server_body(ServerList, Children, TotalTurns, ViewsPerTurn, PermaList, ShutDownList, TurnSinceInactive, DiscoveredPerTurn, CurrentTurns) ->
     receive
         {up_done, PID, NewPeerList} -> % receive peer info at the end of a turn and start the next one
-            fwrite(" Update from ~p:  \n", [PID]),
+            fwrite(" Update from ~p  \n", [PID]),
 
             %retrieve old list
             Index = index_pid(PID, Children),
@@ -94,13 +94,16 @@ server_body(ServerList, Children, TotalTurns, ViewsPerTurn, PermaList, TurnSince
                     fwrite("~p\n", [DiscoveryProps]),
 
                     % compute churn resilience of all nodes that exited
+                    %fwrite("ViewsPerTurn: ~p\n", [ViewsPerTurn]),
+                    AvgChrunRes = avg_churn_resilience(ShutDownList, Children, TurnSinceInactive, ViewsPerTurn),
+                    fwrite("Average Churn Resilience: ~p\n", [AvgChrunRes]),
 
                     [Peer ! {stop} || Peer <- Children],
                     exit(normal);
                 true ->
                     pass
             end,
-            server_body(NewListOfLists, Children, TotalTurns, NewViewsPerTurn, PermaList, TurnSinceInactive, NewDiscoveredPerTurn, NewCurrentTurns);
+            server_body(NewListOfLists, Children, TotalTurns, NewViewsPerTurn, PermaList, ShutDownList, TurnSinceInactive, NewDiscoveredPerTurn, NewCurrentTurns);
 
         {bye, PID} ->
             %update inactive
@@ -109,8 +112,9 @@ server_body(ServerList, Children, TotalTurns, ViewsPerTurn, PermaList, TurnSince
             NewTurnSinceInactive = update_list_indexed_elem(TurnSinceInactive, Index, ThisTurn),
 
             % TODO begin check for exit node churn resilience (At every turn, drop a subset of nodes, not random chance for every node)
+            NewShutDownList = append(ShutDownList, [PID]),
 
-            server_body(ServerList, Children, TotalTurns, ViewsPerTurn, PermaList, NewTurnSinceInactive, DiscoveredPerTurn, CurrentTurns)
+            server_body(ServerList, Children, TotalTurns, ViewsPerTurn, PermaList, NewShutDownList, NewTurnSinceInactive, DiscoveredPerTurn, CurrentTurns)
     end.
 
 % creates N peer objects
@@ -168,11 +172,38 @@ check_if_end(TotalTurns, TurnSinceInactive, CurrentTurns, N, I) ->
         true ->
             false
     end.
-    
-% sends a shutdown message to every node in List
-shut_nodes([]) -> empty;
-shut_nodes([H|T]) ->
-    H ! {stop},
-    shut_nodes(T).
-    
 
+%functions to compute average churn resilience
+turns_to_get_out(PID, Turn, ViewList) ->
+    if 
+        Turn =< length(ViewList) ->
+            IsInView = member(PID, nth(Turn, ViewList)),
+            if 
+                IsInView ->
+                turns_to_get_out(PID, Turn+1, ViewList);
+            true ->
+                Turn
+            end;
+        true ->
+            0
+    end.
+
+compute_churn_resilience_node(_, _, []) -> empty;
+compute_churn_resilience_node(PID, Turn, ViewsPerTurn) -> 
+    N = length(ViewsPerTurn),
+    Thresh = 0.75 * N,
+    compute_churn_resilience_node(PID, Turn, ViewsPerTurn, 0, N, Thresh).
+
+compute_churn_resilience_node(_, _, [], I, N, Thresh) -> I / N;
+compute_churn_resilience_node(PID, Turn, [H|T], I, N, Thresh) ->
+    compute_churn_resilience_node(PID, Turn, T, I + turns_to_get_out(PID, Turn, H), N, Thresh).
+
+avg_churn_resilience([], _, _, _) -> empty;
+avg_churn_resilience(ShutDownList, Children, TurnSinceInactive, ViewsPerTurn) -> avg_churn_resilience(ShutDownList, Children, TurnSinceInactive, ViewsPerTurn, 0, length(ShutDownList)).
+
+avg_churn_resilience([], _, _, _, Accumulator, Length) -> Accumulator / Length;
+avg_churn_resilience([H|T], Children, TurnSinceInactive, ViewsPerTurn, Accumulator, Length) ->
+    Index = index_pid(H, Children),
+    Turn = nth(Index, TurnSinceInactive),
+    Churn_res_current = compute_churn_resilience_node(H, Turn, ViewsPerTurn),
+    avg_churn_resilience([H|T], Children, TurnSinceInactive, ViewsPerTurn, Accumulator + Churn_res_current, Length).

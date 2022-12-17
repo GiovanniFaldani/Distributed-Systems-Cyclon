@@ -5,7 +5,7 @@
 -import(rand,[uniform/0]).
 -import(timer,[send_after/2]).
 -import(utils, [shuffle_list/1, pick_L_elements/2, list_max_id/1, reset_peer_age/2, 
-    list_max_tuple/1, index_elem/2, remove_n_max/2, remove_pid_list/2, filter_list/2]).
+    list_max_tuple/1, index_elem/2, remove_n_max/2, remove_pid_list/2, filter_list/2, filter_tuple_list/2, remove_duplicates/1]).
 
 
 -export([peer_execution/10]).
@@ -84,7 +84,7 @@ peer_execution(Server, PeerList, ViewSize, L, PermaList, IsVerbose, Turn, TurnDu
 
             peer_execution(Server, NewPeerList, ViewSize, L, PermaList, IsVerbose, Turn + 1, TurnDuration, TotalTurns, false);
 
-        {req_view, _, PID} ->
+        {req_view, ReqList, PID} ->
             if
                 IsVerbose ->
                     fwrite("~p: Request from ~p \n", [self(), PID]);
@@ -95,10 +95,10 @@ peer_execution(Server, PeerList, ViewSize, L, PermaList, IsVerbose, Turn, TurnDu
             % 5 - Q SENDS BACK A SUBSET OF L-1 NODES IN ITS VIEW
 
             ReplyList = pick_L_elements(PeerList, L),
-            PID ! {rep_view, ReplyList},
+            PID ! {rep_view, ReplyList, ReqList},
             peer_execution(Server, PeerList, ViewSize, L, PermaList, IsVerbose, Turn, TurnDuration, TotalTurns, IsDone);
 
-        {rep_view, RepList} ->
+        {rep_view, RepList, ReqList} ->
             if
                 IsVerbose ->
                     fwrite("~p: Reply from Q \n", [self()]);
@@ -108,7 +108,7 @@ peer_execution(Server, PeerList, ViewSize, L, PermaList, IsVerbose, Turn, TurnDu
 
             % 6 AND 7 - RECEIVE ENTRIES FROM Q AND UPDATE OWN LIST
 
-            NewPeerList = update_list(PeerList, RepList, ViewSize),
+            NewPeerList = update_list(PeerList, RepList, ReqList, ViewSize),
 
             TossCoin = uniform(),
             if
@@ -118,7 +118,7 @@ peer_execution(Server, PeerList, ViewSize, L, PermaList, IsVerbose, Turn, TurnDu
                     pass
             end,
 
-            peer_execution(Server, NewPeerList, ViewSize, L, PermaList,IsVerbose, Turn, TurnDuration, TotalTurns, true);
+            peer_execution(Server, NewPeerList, ViewSize, L, PermaList, IsVerbose, Turn, TurnDuration, TotalTurns, true);
 
         {ciao, SenderId} ->
             if
@@ -136,16 +136,23 @@ peer_execution(Server, PeerList, ViewSize, L, PermaList, IsVerbose, Turn, TurnDu
     end. 
 
 % updates the Tuple List to remove entries already in view or pointing to self
-update_list(List, CompareList, Max) ->
-    FilteredList = filter_list(CompareList, List),
-    ListCleaned = remove_pid_list(self(), FilteredList),
+update_list(List, CompareList, ReqList, Max) ->
+    % reset age of all nodes in the list received from Q
+    ZeroedList = [{ID, 0} || {ID, _} <- CompareList],
+
+    %remove elements in common and get new nodes (includes self)
+    FilteredList = filter_tuple_list(ZeroedList, List), 
 
     %add removal of self()
+    ListCleaned = remove_pid_list(self(), FilteredList),
+
+    % save new elements over the elements that were originally sent
     NumToAdd = length(ListCleaned),
     CurrentNum = length(List),
     if
         NumToAdd > Max - CurrentNum ->
-            ListFreed = remove_n_max(List, NumToAdd - Max + CurrentNum);
+            %ListFreed = remove_n_max(List, NumToAdd - Max + CurrentNum);
+            ListFreed = filter_tuple_list_first_N(List, ReqList, NumToAdd - Max + CurrentNum);
         true ->
             ListFreed = List
     end,
@@ -159,3 +166,9 @@ send_rand_message(List, ThisID) ->
 % delete unresponsive peer from List
 remove_old_q(OldQ, List, false) -> delete({OldQ, 0}, List);
 remove_old_q(_, List, _) -> List.
+
+% removes from the first list the first N elements of the second list
+filter_tuple_list_first_N([], _, _) -> empty;
+filter_tuple_list_first_N(TupleList, _, 0) -> TupleList;
+filter_tuple_list_first_N(TupleList, [H|T], N) ->
+    filter_tuple_list_first_N([{ID, Age} || {ID, Age} <- TupleList, element(1,H) =/= ID], T, N-1).

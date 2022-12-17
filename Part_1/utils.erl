@@ -15,6 +15,7 @@
 -export([remove_n_max/2]).
 -export([remove_pid_list/2]).
 -export([filter_list/2]).
+-export([filter_tuple_list/2]).
 -export([remove_duplicates/1]).
 
 
@@ -67,6 +68,12 @@ remove_index_list(Index, List)->
 filter_list([], _) -> [];
 filter_list(List, []) -> List;
 filter_list(List, [H | T]) -> filter_list(delete(H, List), T).
+
+%removes from the first list all the elements with the same ID in the second
+filter_tuple_list([], _) -> [];
+filter_tuple_list(TupleList, []) -> TupleList;
+filter_tuple_list(TupleList, [H|T]) -> 
+    filter_tuple_list([{ID, Age} || {ID, Age} <- TupleList, element(1,H) =/= ID], T).
     
 % remove all duplicate elements from a list
 remove_duplicates(List) ->
