@@ -4,7 +4,7 @@
 -import(lists,[sum/1,nth/2, sort/1, sublist/2, append/2]).
 -import(rand,[uniform/1, uniform/0]).
 -import(my_peer, [peer_execution/7, peer_init/2]).
--import(utils, [shuffle_list/1, remove_pid_list/2, filter_list/2, index_elem/2, remove_duplicates/1]).
+-import(utils, [shuffle_list/1, pick_L_elements/2, remove_pid_list/2, filter_list/2, index_elem/2, remove_duplicates/1]).
 
 -export([run/1]).
 
@@ -24,9 +24,12 @@ run(N) ->
     %list containing the starting views per every peer
     ListOfPidLists = [create_start_list(Children, MaxAge, ViewSize, CurrentPeer) || CurrentPeer <- Children],
 
+    % Pick 50% of nodes that won't shut down during runtime
+    PermaList = [Child || Child <- Children, uniform() < 0.5],
+
     %List with one list per peer containing its total discoveries
     ServerList = [convert_peer_list(TupleList) || TupleList <- ListOfPidLists],
-    initialize_n_peers(NPeers, Children, ListOfPidLists, ViewSize, L, TurnDuration, TotalTurns),
+    initialize_n_peers(NPeers, Children, ListOfPidLists, ViewSize, L, PermaList, TurnDuration, TotalTurns),
 
     %-1 if made it to the end, otherwise equal of the rounds done
     TurnSinceInactive = [ -1 ||  _ <- Children],
@@ -38,11 +41,14 @@ run(N) ->
     DiscoveredPerTurn = [[length(FirstView) + 1] || FirstView <- ServerList],
     CurrentTurns = [ 0 ||  _ <- Children],
 
+    % initialize list of nodes that have been shut down
+    ShutDownList = [],
+
     start_n_peers(Children),
-    server_body(ServerList, Children, TotalTurns, ViewsPerTurn, TurnSinceInactive, DiscoveredPerTurn, CurrentTurns).
+    server_body(ServerList, Children, TotalTurns, ViewsPerTurn, PermaList, TurnSinceInactive, DiscoveredPerTurn, CurrentTurns).
 
 % main server loop
-server_body(ServerList, Children, TotalTurns, ViewsPerTurn, TurnSinceInactive, DiscoveredPerTurn, CurrentTurns) ->
+server_body(ServerList, Children, TotalTurns, ViewsPerTurn, PermaList, TurnSinceInactive, DiscoveredPerTurn, CurrentTurns) ->
     receive
         {up_done, PID, NewPeerList} -> % receive peer info at the end of a turn and start the next one
             fwrite(" Update from ~p:  \n", [PID]),
@@ -76,22 +82,25 @@ server_body(ServerList, Children, TotalTurns, ViewsPerTurn, TurnSinceInactive, D
             NewDiscoveredByPID = append(DiscoveredByPID, NewTotal),
             NewDiscoveredPerTurn = update_list_indexed_elem(DiscoveredPerTurn, Index, NewDiscoveredByPID),
 
-
             HasEnded = check_if_end(TotalTurns, TurnSinceInactive, CurrentTurns, length(Children)),
 
             if
                 HasEnded ->
                     fwrite("All Done \n"),
-                    % compute discovery proportion for this node
-                    DiscoveryProportion = length(nth(Index, NewListOfLists)) / length(Children),
-                    fwrite("Discovery proportion of PID: ~p", [PID]),
-                    fwrite(" = ~p \n", [DiscoveryProportion]),
+                    % compute discovery proportion of all nodes
+                    N = length(Children),
+                    DiscoveryProps = [length(List)/N || List <- NewListOfLists],
+                    fwrite("Discovery proportion of PIDs: ~p\n", [Children]),
+                    fwrite("~p\n", [DiscoveryProps]),
+
+                    % compute churn resilience of all nodes that exited
+
                     [Peer ! {stop} || Peer <- Children],
                     exit(normal);
                 true ->
                     pass
             end,
-            server_body(NewListOfLists, Children, TotalTurns, NewViewsPerTurn, TurnSinceInactive, NewDiscoveredPerTurn, NewCurrentTurns);
+            server_body(NewListOfLists, Children, TotalTurns, NewViewsPerTurn, PermaList, TurnSinceInactive, NewDiscoveredPerTurn, NewCurrentTurns);
 
         {bye, PID} ->
             %update inactive
@@ -99,9 +108,9 @@ server_body(ServerList, Children, TotalTurns, ViewsPerTurn, TurnSinceInactive, D
             ThisTurn = nth(Index, CurrentTurns),
             NewTurnSinceInactive = update_list_indexed_elem(TurnSinceInactive, Index, ThisTurn),
 
-            % begin check for exit node churn resilience
+            % TODO begin check for exit node churn resilience (At every turn, drop a subset of nodes, not random chance for every node)
 
-            server_body(ServerList, Children, TotalTurns, ViewsPerTurn, NewTurnSinceInactive, DiscoveredPerTurn, CurrentTurns)
+            server_body(ServerList, Children, TotalTurns, ViewsPerTurn, PermaList, NewTurnSinceInactive, DiscoveredPerTurn, CurrentTurns)
     end.
 
 % creates N peer objects
@@ -111,13 +120,14 @@ create_n_peers(N, Children, IsVerbose) ->
     create_n_peers(N - 1, append(Children, [Child]), IsVerbose).
 
 % initializes parameters for N peer objects
-initialize_n_peers(N, Children, ListOfPidLists, ViewSize, L, TurnDuration, TotalTurns) -> initialize_n_peers(0, N, Children, ListOfPidLists, ViewSize, L, TurnDuration, TotalTurns).
-initialize_n_peers(N, N, _, _, _, _, _,_) -> empty;
-initialize_n_peers(I, N, Children, ListOfPidLists, ViewSize, L, TurnDuration, TotalTurns) ->
+initialize_n_peers(N, Children, ListOfPidLists, ViewSize, L, PermaList, TurnDuration, TotalTurns) -> 
+    initialize_n_peers(0, N, Children, ListOfPidLists, ViewSize, L, PermaList, TurnDuration, TotalTurns).
+initialize_n_peers(N, N, _, _, _, _, _,_,_) -> empty;
+initialize_n_peers(I, N, Children, ListOfPidLists, ViewSize, L, PermaList, TurnDuration, TotalTurns) ->
     CurrentPeer = nth(I + 1, Children),
     CurrentList = nth(I + 1, ListOfPidLists),
-    CurrentPeer ! {init, CurrentList, ViewSize, L, TurnDuration, TotalTurns},
-    initialize_n_peers(I + 1, N, Children, ListOfPidLists, ViewSize, L, TurnDuration, TotalTurns). 
+    CurrentPeer ! {init, CurrentList, ViewSize, L, PermaList, TurnDuration, TotalTurns},
+    initialize_n_peers(I + 1, N, Children, ListOfPidLists, ViewSize, L, PermaList, TurnDuration, TotalTurns). 
 
 % creates a Tuple List of {PID, Age} for a peer
 create_start_list(PidList, MaxAge, ViewSize, CurrentPeer) ->
@@ -159,5 +169,10 @@ check_if_end(TotalTurns, TurnSinceInactive, CurrentTurns, N, I) ->
             false
     end.
     
+% sends a shutdown message to every node in List
+shut_nodes([]) -> empty;
+shut_nodes([H|T]) ->
+    H ! {stop},
+    shut_nodes(T).
     
 
