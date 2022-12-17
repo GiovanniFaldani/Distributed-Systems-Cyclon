@@ -206,4 +206,4 @@ avg_churn_resilience([H|T], Children, TurnSinceInactive, ViewsPerTurn, Accumulat
     Index = index_pid(H, Children),
     Turn = nth(Index, TurnSinceInactive),
     Churn_res_current = compute_churn_resilience_node(H, Turn, ViewsPerTurn),
-    avg_churn_resilience([H|T], Children, TurnSinceInactive, ViewsPerTurn, Accumulator + Churn_res_current, Length).
+    avg_churn_resilience(T, Children, TurnSinceInactive, ViewsPerTurn, Accumulator + Churn_res_current, Length).
