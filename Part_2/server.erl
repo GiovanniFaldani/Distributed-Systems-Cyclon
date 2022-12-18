@@ -4,25 +4,39 @@
 -import(lists,[sum/1,nth/2, sort/1, sublist/2, append/2, member/2]).
 -import(rand,[uniform/1, uniform/0]).
 -import(my_peer, [peer_execution/7, peer_init/2]).
+-import(byzantine, [byz_execution/7, byz_init/2]).
 -import(utils, [shuffle_list/1, pick_L_elements/2, remove_pid_list/2, filter_list/2, index_elem/2, remove_duplicates/1]).
 
--export([run/1]).
+-export([run/4]).
+
+
+% HOW TO DUMP TO CSV
+% from erlang shell
+% {ok, F} = file:open("./data/resultsN_ViewSize_L.csv", [write]).
+% group_leader(F, self()).
+% server:run(N, ViewSize, L, false).
 
 % environment setup for the server
-run(N) ->
+run(N, ViewSize, L, IsVerbose) ->
     NPeers = N,
-    ViewSize = 5,
-    L = 3,
-    IsVerbose = true,
+    %#ViewSize = round(0.5*N),
+    %L = round(0.3*N),
+    %IsVerbose = true,
     MaxAge = 10,
-    TurnDuration = 5000, %ms
+    TurnDuration = 10000, %ms
     TotalTurns = 10,
 
     %list containing every peer's pid
     Children = create_n_peers(NPeers, [], IsVerbose),
 
+    %create 10% of byzantine nodes
+    Byzantines = create_n_byzantines(round(0.1*NPeers), [], IsVerbose),
+
+    %merge children and byzantine lists
+    ChildrenAndByz = append(Children, Byzantines),
+
     %list containing the starting views per every peer
-    ListOfPidLists = [create_start_list(Children, MaxAge, ViewSize, CurrentPeer) || CurrentPeer <- Children],
+    ListOfPidLists = [create_start_list(ChildrenAndByz, MaxAge, ViewSize, CurrentPeer) || CurrentPeer <- Children],
 
     % Pick 50% of nodes that won't shut down during runtime
     PermaList = [Child || Child <- Children, uniform() < 0.5],
@@ -30,25 +44,26 @@ run(N) ->
     %List with one list per peer containing its total discoveries
     ServerList = [convert_peer_list(TupleList) || TupleList <- ListOfPidLists],
     initialize_n_peers(NPeers, Children, ListOfPidLists, ViewSize, L, PermaList, TurnDuration, TotalTurns),
+    initialize_n_byz(round(0.1*NPeers), Byzantines, ListOfPidLists, ViewSize, L, PermaList, TurnDuration, TotalTurns),
 
     %-1 if made it to the end, otherwise equal of the rounds done
-    TurnSinceInactive = [ -1 ||  _ <- Children],
+    TurnSinceInactive = [ -1 ||  _ <- ChildrenAndByz],
 
     %List with one list per peer containing its view every turn
     ViewsPerTurn = [[FirstView] || FirstView <- ServerList],
 
     %List with one list per peer containing the evolution of its total discoveries
     DiscoveredPerTurn = [[length(FirstView) + 1] || FirstView <- ServerList],
-    CurrentTurns = [ 0 ||  _ <- Children],
+    CurrentTurns = [ 0 ||  _ <- ChildrenAndByz],
 
     % initialize list of nodes that have been shut down
     ShutDownList = [],
 
-    start_n_peers(Children),
-    server_body(ServerList, Children, TotalTurns, ViewsPerTurn, PermaList, ShutDownList, TurnSinceInactive, DiscoveredPerTurn, CurrentTurns).
+    start_n_peers(ChildrenAndByz),
+    server_body(ServerList, Children, Byzantines, TotalTurns, ViewsPerTurn, PermaList, ShutDownList, TurnSinceInactive, DiscoveredPerTurn, CurrentTurns).
 
 % main server loop
-server_body(ServerList, Children, TotalTurns, ViewsPerTurn, PermaList, ShutDownList, TurnSinceInactive, DiscoveredPerTurn, CurrentTurns) ->
+server_body(ServerList, Children, Byzantines, TotalTurns, ViewsPerTurn, PermaList, ShutDownList, TurnSinceInactive, DiscoveredPerTurn, CurrentTurns) ->
     receive
         {up_done, PID, NewPeerList} -> % receive peer info at the end of a turn and start the next one
             fwrite(" Update from ~p  \n", [PID]),
@@ -87,23 +102,29 @@ server_body(ServerList, Children, TotalTurns, ViewsPerTurn, PermaList, ShutDownL
             if
                 HasEnded ->
                     fwrite("All Done \n"),
+                    fwrite("Initial Byzantine PIDs: ~p:\n", [Byzantines]),
                     % compute discovery proportion of all nodes
                     N = length(Children),
                     DiscoveryProps = [length(List)/N || List <- NewListOfLists],
-                    fwrite("Discovery proportion of PIDs: ~p\n", [Children]),
+                    fwrite("Discovery proportion of PIDs: ~p\n\n", [Children]),
                     fwrite("~p\n", [DiscoveryProps]),
 
                     % compute churn resilience of all nodes that exited
                     %fwrite("ViewsPerTurn: ~p\n", [ViewsPerTurn]),
-                    AvgChrunRes = avg_churn_resilience(ShutDownList, Children, TurnSinceInactive, ViewsPerTurn),
-                    fwrite("Average Churn Resilience: ~p\n", [AvgChrunRes]),
+                    AvgChurnRes = avg_churn_resilience(ShutDownList, Children, TurnSinceInactive, ViewsPerTurn),
+                    fwrite("Average Churn Resilience: ~p\n\n", [AvgChurnRes]),
+
+                    %print useful data for metrics
+                    fwrite("ViewsPerTurn: ~p\n\n", [ViewsPerTurn]),
+                    fwrite("TurnSinceInactive: ~p\n\n", [TurnSinceInactive]),
+                    fwrite("ShutDownList: ~p\n\n", [ShutDownList]),
 
                     [Peer ! {stop} || Peer <- Children],
                     exit(normal);
                 true ->
                     pass
             end,
-            server_body(NewListOfLists, Children, TotalTurns, NewViewsPerTurn, PermaList, ShutDownList, TurnSinceInactive, NewDiscoveredPerTurn, NewCurrentTurns);
+            server_body(NewListOfLists, Children, Byzantines, TotalTurns, NewViewsPerTurn, PermaList, ShutDownList, TurnSinceInactive, NewDiscoveredPerTurn, NewCurrentTurns);
 
         {bye, PID} ->
             %update inactive
@@ -114,7 +135,7 @@ server_body(ServerList, Children, TotalTurns, ViewsPerTurn, PermaList, ShutDownL
             % TODO begin check for exit node churn resilience (At every turn, drop a subset of nodes, not random chance for every node)
             NewShutDownList = append(ShutDownList, [PID]),
 
-            server_body(ServerList, Children, TotalTurns, ViewsPerTurn, PermaList, NewShutDownList, NewTurnSinceInactive, DiscoveredPerTurn, CurrentTurns)
+            server_body(ServerList, Children, Byzantines, TotalTurns, ViewsPerTurn, PermaList, NewShutDownList, NewTurnSinceInactive, DiscoveredPerTurn, CurrentTurns)
     end.
 
 % creates N peer objects
@@ -122,6 +143,12 @@ create_n_peers(0, Children, _) -> Children;
 create_n_peers(N, Children, IsVerbose) ->
     Child = spawn(my_peer, peer_init, [self(), IsVerbose]),
     create_n_peers(N - 1, append(Children, [Child]), IsVerbose).
+
+% creates N byzantine objects
+create_n_byzantines(0, Byzantines, _) -> Byzantines;
+create_n_byzantines(N, Byzantines, IsVerbose) ->
+    Byz = spawn(byzantine, byz_init, [self(), IsVerbose]),
+    create_n_peers(N - 1, append(Byzantines, [Byz]), IsVerbose).
 
 % initializes parameters for N peer objects
 initialize_n_peers(N, Children, ListOfPidLists, ViewSize, L, PermaList, TurnDuration, TotalTurns) -> 
@@ -132,6 +159,15 @@ initialize_n_peers(I, N, Children, ListOfPidLists, ViewSize, L, PermaList, TurnD
     CurrentList = nth(I + 1, ListOfPidLists),
     CurrentPeer ! {init, CurrentList, ViewSize, L, PermaList, TurnDuration, TotalTurns},
     initialize_n_peers(I + 1, N, Children, ListOfPidLists, ViewSize, L, PermaList, TurnDuration, TotalTurns). 
+
+%initializes parameters for N byzantine objects
+initialize_n_byz(N, Byzantines, ListOfPidLists, ViewSize, L, PermaList, TurnDuration, TotalTurns) -> 
+    initialize_n_byz(0, N, Byzantines, ListOfPidLists, ViewSize, L, PermaList, TurnDuration, TotalTurns).
+initialize_n_byz(N, N, _, _, _, _, _,_,_) -> empty;
+initialize_n_byz(I, N, Byzantines, ListOfPidLists, ViewSize, L, PermaList, TurnDuration, TotalTurns) ->
+    CurrentByz = nth(I + 1, Byzantines),
+    CurrentByz ! {init, Byzantines, ViewSize, L, PermaList, TurnDuration, TotalTurns},
+    initialize_n_byz(I + 1, N, Byzantines, ListOfPidLists, ViewSize, L, PermaList, TurnDuration, TotalTurns). 
 
 % creates a Tuple List of {PID, Age} for a peer
 create_start_list(PidList, MaxAge, ViewSize, CurrentPeer) ->
