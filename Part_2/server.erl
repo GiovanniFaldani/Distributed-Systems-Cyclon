@@ -6,23 +6,16 @@
 -import(my_peer, [peer_execution/7, peer_init/2]).
 -import(utils, [shuffle_list/1, pick_L_elements/2, remove_pid_list/2, filter_list/2, index_elem/2, remove_duplicates/1]).
 
--export([run/4]).
-
-
-% HOW TO DUMP TO CSV
-% from erlang shell
-% {ok, F} = file:open("./data/resultsN_ViewSize_L.csv", [write]).
-% group_leader(F, self()).
-% server:run(N, ViewSize, L, false).
+-export([run/1]).
 
 % environment setup for the server
-run(N, ViewSize, L, IsVerbose) ->
+run(N) ->
     NPeers = N,
-    %#ViewSize = round(0.5*N),
-    %L = round(0.3*N),
-    %IsVerbose = true,
+    ViewSize = 5,
+    L = 3,
+    IsVerbose = true,
     MaxAge = 10,
-    TurnDuration = 10000, %ms
+    TurnDuration = 5000, %ms
     TotalTurns = 10,
 
     %list containing every peer's pid
@@ -97,18 +90,13 @@ server_body(ServerList, Children, TotalTurns, ViewsPerTurn, PermaList, ShutDownL
                     % compute discovery proportion of all nodes
                     N = length(Children),
                     DiscoveryProps = [length(List)/N || List <- NewListOfLists],
-                    fwrite("Discovery proportion of PIDs: ~p\n\n", [Children]),
+                    fwrite("Discovery proportion of PIDs: ~p\n", [Children]),
                     fwrite("~p\n", [DiscoveryProps]),
 
                     % compute churn resilience of all nodes that exited
                     %fwrite("ViewsPerTurn: ~p\n", [ViewsPerTurn]),
-                    AvgChurnRes = avg_churn_resilience(ShutDownList, Children, TurnSinceInactive, ViewsPerTurn),
-                    fwrite("Average Churn Resilience: ~p\n\n", [AvgChurnRes]),
-
-                    %print useful data for metrics
-                    fwrite("ViewsPerTurn: ~p\n\n", [ViewsPerTurn]),
-                    fwrite("TurnSinceInactive: ~p\n\n", [TurnSinceInactive]),
-                    fwrite("ShutDownList: ~p\n\n", [ShutDownList]),
+                    AvgChrunRes = avg_churn_resilience(ShutDownList, Children, TurnSinceInactive, ViewsPerTurn),
+                    fwrite("Average Churn Resilience: ~p\n", [AvgChrunRes]),
 
                     [Peer ! {stop} || Peer <- Children],
                     exit(normal);
