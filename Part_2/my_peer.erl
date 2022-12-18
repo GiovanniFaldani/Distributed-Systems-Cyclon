@@ -29,7 +29,7 @@ peer_init(Server, IsVerbose) ->
                     pass
             end,
 
-            peer_execution(Server, PeerList, ViewSize, L, PermaList, IsVerbose, 0, TurnDuration, TotalTurns, true)
+            peer_execution(Server, PeerList, ViewSize, L, PermaList, IsVerbose, 0, TurnDuration, TotalTurns, false)
     end.
 
 % main loop for the peer nodes

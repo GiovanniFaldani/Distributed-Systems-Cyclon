@@ -27,7 +27,7 @@ byz_init(Server, IsVerbose) ->
                     pass
             end,
 
-            byz_execution(Server, ByzList, ViewSize, L, PermaList, IsVerbose, 0, TurnDuration, TotalTurns, true)
+            byz_execution(Server, ByzList, ViewSize, L, PermaList, IsVerbose, 0, TurnDuration, TotalTurns, false)
     end.
 
 % main loop for the peer nodes
