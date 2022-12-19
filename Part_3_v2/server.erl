@@ -7,18 +7,18 @@
 -import(byzantine, [byz_execution/7, byz_init/2]).
 -import(utils, [shuffle_list/1, pick_L_elements/2, remove_pid_list/2, filter_list/2, index_elem/2, remove_duplicates/1]).
 
--export([run/4]).
+-export([run/5]).
 
 
 % HOW TO DUMP TO CSV
 % from erlang shell
-% {ok, F} = file:open("./data/resultsN_ViewSize_L.csv", [write]).
+% {ok, F} = file:open("./data/results100_10_5_ByzProp.csv", [write]).
 % group_leader(F, self()).
-% server:run(N, ViewSize, L, false).
+% server:run(100, 10, 5, ByzProp, false).
 
 % environment setup for the server
-run(N, ViewSize, L, IsVerbose) ->
-    NPeers = N,
+run(N, ViewSize, L, ByzantineProportion, IsVerbose) ->
+    NPeers = N * round((1-ByzantineProportion)),
     %#ViewSize = round(0.5*N),
     %L = round(0.3*N),
     %IsVerbose = true,
@@ -30,7 +30,7 @@ run(N, ViewSize, L, IsVerbose) ->
     Children = create_n_peers(NPeers, [], IsVerbose),
 
     %create 10% of byzantine nodes
-    Byzantines = create_n_byzantines(round(0.1*NPeers), [], IsVerbose),
+    Byzantines = create_n_byzantines(round(ByzantineProportion*N), [], IsVerbose),
 
     %merge children and byzantine lists
     ChildrenAndByz = append(Children, Byzantines),
@@ -44,7 +44,7 @@ run(N, ViewSize, L, IsVerbose) ->
     %List with one list per peer containing its total discoveries
     ServerList = [convert_peer_list(TupleList) || TupleList <- ListOfPidLists],
     initialize_n_peers(NPeers, Children, ListOfPidLists, ViewSize, L, PermaList, TurnDuration, TotalTurns),
-    initialize_n_byz(round(0.1*NPeers), Byzantines, ListOfPidLists, ViewSize, L, PermaList, TurnDuration, TotalTurns),
+    initialize_n_byz(round(ByzantineProportion*N), Byzantines, ListOfPidLists, ViewSize, L, PermaList, TurnDuration, TotalTurns),
 
     %-1 if made it to the end, otherwise equal of the rounds done
     TurnSinceInactive = [ -1 ||  _ <- ChildrenAndByz],
@@ -106,18 +106,12 @@ server_body(ServerList, Children, Byzantines, TotalTurns, ViewsPerTurn, PermaLis
                     % compute discovery proportion of all nodes
                     N = length(Children),
                     DiscoveryProps = [length(List)/N || List <- NewListOfLists],
-                    fwrite("Discovery proportion of PIDs: ~p\n\n", [Children]),
-                    fwrite("~p\n", [DiscoveryProps]),
-
-                    % compute churn resilience of all nodes that exited
-                    %fwrite("ViewsPerTurn: ~p\n", [ViewsPerTurn]),
-                    AvgChurnRes = avg_churn_resilience(ShutDownList, Children, TurnSinceInactive, ViewsPerTurn),
-                    fwrite("Average Churn Resilience: ~p\n\n", [AvgChurnRes]),
+                    fwrite("Discovery proportions: ~p\n\n", [DiscoveryProps]),
 
                     %print useful data for metrics
-                    fwrite("ViewsPerTurn: ~p\n\n", [ViewsPerTurn]),
+                    fwrite("Children ~p\n\n", [Children]),
                     fwrite("TurnSinceInactive: ~p\n\n", [TurnSinceInactive]),
-                    fwrite("ShutDownList: ~p\n\n", [ShutDownList]),
+                    fwrite("ViewsPerTurn: ~p\n\n", [ViewsPerTurn]),
 
                     [Peer ! {stop} || Peer <- Children],
                     exit(normal);
@@ -208,38 +202,3 @@ check_if_end(TotalTurns, TurnSinceInactive, CurrentTurns, N, I) ->
         true ->
             false
     end.
-
-%functions to compute average churn resilience
-turns_to_get_out(PID, Turn, ViewList) ->
-    if 
-        Turn =< length(ViewList) ->
-            IsInView = member(PID, nth(Turn, ViewList)),
-            if 
-                IsInView ->
-                turns_to_get_out(PID, Turn+1, ViewList);
-            true ->
-                Turn
-            end;
-        true ->
-            0
-    end.
-
-compute_churn_resilience_node(_, _, []) -> empty;
-compute_churn_resilience_node(PID, Turn, ViewsPerTurn) -> 
-    N = length(ViewsPerTurn),
-    Thresh = 0.75 * N,
-    compute_churn_resilience_node(PID, Turn, ViewsPerTurn, 0, N, Thresh).
-
-compute_churn_resilience_node(_, _, [], I, N, Thresh) -> I / N;
-compute_churn_resilience_node(PID, Turn, [H|T], I, N, Thresh) ->
-    compute_churn_resilience_node(PID, Turn, T, I + turns_to_get_out(PID, Turn, H), N, Thresh).
-
-avg_churn_resilience([], _, _, _) -> empty;
-avg_churn_resilience(ShutDownList, Children, TurnSinceInactive, ViewsPerTurn) -> avg_churn_resilience(ShutDownList, Children, TurnSinceInactive, ViewsPerTurn, 0, length(ShutDownList)).
-
-avg_churn_resilience([], _, _, _, Accumulator, Length) -> Accumulator / Length;
-avg_churn_resilience([H|T], Children, TurnSinceInactive, ViewsPerTurn, Accumulator, Length) ->
-    Index = index_pid(H, Children),
-    Turn = nth(Index, TurnSinceInactive),
-    Churn_res_current = compute_churn_resilience_node(H, Turn, ViewsPerTurn),
-    avg_churn_resilience(T, Children, TurnSinceInactive, ViewsPerTurn, Accumulator + Churn_res_current, Length).
