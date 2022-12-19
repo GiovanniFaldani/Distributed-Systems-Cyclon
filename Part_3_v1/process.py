@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import re
 
-File = open("./data/results100_10_5_0.3.csv")
+File = open("./data/results100_10_5_0.5.csv")
 
 Filestring = File.read()
 
