@@ -101,9 +101,8 @@ server_body(ServerList, Children, TotalTurns, ViewsPerTurn, PermaList, ShutDownL
 
                     %print useful data for metrics
                     fwrite("Children ~p\n\n", [Children]),
-                    fwrite("ViewsPerTurn: ~p\n\n", [ViewsPerTurn]),
                     fwrite("TurnSinceInactive: ~p\n\n", [TurnSinceInactive]),
-                    fwrite("ShutDownList: ~p\n\n", [ShutDownList]),
+                    fwrite("ViewsPerTurn: ~p\n\n", [ViewsPerTurn]),
 
                     [Peer ! {stop} || Peer <- Children],
                     exit(normal);
