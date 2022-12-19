@@ -7,7 +7,7 @@
 -import(byzantine, [byz_execution/7, byz_init/2]).
 -import(utils, [shuffle_list/1, pick_L_elements/2, remove_pid_list/2, filter_list/2, index_elem/2, remove_duplicates/1]).
 
--export([run/4]).
+-export([run/5]).
 
 
 % HOW TO DUMP TO CSV
@@ -17,11 +17,12 @@
 % server:run(N, ViewSize, L, false).
 
 % environment setup for the server
-run(N, ViewSize, L, IsVerbose) ->
+run(N, ViewSize, L, ByzantineProportion, IsVerbose) ->
     NPeers = N,
     %#ViewSize = round(0.5*N),
     %L = round(0.3*N),
     %IsVerbose = true,
+    % ByzantineProportion = 0.1
     MaxAge = 10,
     TurnDuration = 10000, %ms
     TotalTurns = 10,
@@ -30,7 +31,7 @@ run(N, ViewSize, L, IsVerbose) ->
     Children = create_n_peers(NPeers, [], IsVerbose),
 
     %create 10% of byzantine nodes
-    Byzantines = create_n_byzantines(round(0.1*NPeers), [], IsVerbose),
+    Byzantines = create_n_byzantines(round(ByzantineProportion*NPeers), [], IsVerbose),
 
     %merge children and byzantine lists
     ChildrenAndByz = append(Children, Byzantines),
@@ -70,6 +71,7 @@ server_body(ServerList, Children, Byzantines, TotalTurns, ViewsPerTurn, PermaLis
 
             %retrieve old list
             Index = index_pid(PID, Children),
+            %Index = index_pid(PID, ChildrenAndByz),
             OldList = nth(Index, ServerList),
 
             %increase turn i
@@ -142,7 +144,7 @@ create_n_peers(N, Children, IsVerbose) ->
 create_n_byzantines(0, Byzantines, _) -> Byzantines;
 create_n_byzantines(N, Byzantines, IsVerbose) ->
     Byz = spawn(byzantine, byz_init, [self(), IsVerbose]),
-    create_n_peers(N - 1, append(Byzantines, [Byz]), IsVerbose).
+    create_n_byzantines(N - 1, append(Byzantines, [Byz]), IsVerbose).
 
 % initializes parameters for N peer objects
 initialize_n_peers(N, Children, ListOfPidLists, ViewSize, L, PermaList, TurnDuration, TotalTurns) -> 

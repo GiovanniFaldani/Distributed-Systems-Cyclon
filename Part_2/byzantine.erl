@@ -41,6 +41,9 @@ byz_execution(Server, ByzList, ViewSize, L, PermaList, IsVerbose, Turn, TurnDura
                     pass
             end,
             
+            %SendList = [{ID, 0} || ID <- ByzList],
+            %Server ! {up_done, self(), SendList},
+
             % finish loop if all turns are done
             if
                 Turn =:= TotalTurns ->
@@ -60,7 +63,8 @@ byz_execution(Server, ByzList, ViewSize, L, PermaList, IsVerbose, Turn, TurnDura
             end,
 
             % BYZ SENDS BACK THE SET OF BYZANTINE NODES
-            PID ! {rep_view, pick_L_elements(ByzList, L), ReqList},
+            SendList = [{ID, 0} || ID <- ByzList],
+            PID ! {rep_view, pick_L_elements(SendList, L), ReqList},
             byz_execution(Server, ByzList, ViewSize, L, PermaList, IsVerbose, Turn, TurnDuration, TotalTurns, IsDone);
 
         {rep_view, _, _} ->
