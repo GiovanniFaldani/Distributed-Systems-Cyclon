@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import re
 
-File = open("./data/results100_10_5.csv")
+File = open("./data/results100_10_5_0.5.csv")
 
 Filestring = File.read()
 
@@ -10,7 +10,7 @@ Filestring = File.read()
 Byzantine = Filestring.split('[')[1].split(']')[0].split(',')
 for i in range(len(Byzantine)):
     Byzantine[i] = Byzantine[i].strip()
-print(Byzantine)
+print('Byzantine PIDs:', Byzantine, '\n')
 
 # Average discovery proportion
 DiscProps = Filestring.split('[')[2].split(']')[0].split(',')
@@ -24,14 +24,12 @@ print('Average Discovery Proportion: ', AvgDiscProp,'\n')
 ChildrenPIDs = Filestring.split('[')[3].split(']')[0].split(',')
 for i in range(len(ChildrenPIDs)):
     ChildrenPIDs[i] = ChildrenPIDs[i].strip()
-#print('Children PIDs:', ChildrenPIDs, '\n')
-
-N = len(ChildrenPIDs)
+print('Children PIDs:', ChildrenPIDs, '\n')
 
 #get the list of turns when a node exits
 TurnSinceInactive = Filestring.split('[')[4].split(']')[0].split(',')
 TurnSinceInactive = [int(i) for i in TurnSinceInactive]
-#print('Turn since exiting nodes have been inactive:', TurnSinceInactive, '\n')
+print('Turn since exiting nodes have been inactive:', TurnSinceInactive, '\n')
 
 # get the list of views per turn for every node
 BigList = Filestring.split('[[[')[1].split(']]]')[0].split(',')
@@ -60,9 +58,11 @@ for i in range(len(BigList)):
     else:
         SingleView.append(BigList[i])
 
-#print('List of views of the first node: ', ViewsList[0], '\n')
+print('List of views of the first node: ', ViewsList[0], '\n')
 
 # ViewsList[node][turn] = View of that node at that turn
+
+N = len(ViewsList)
 
 # compute average exit node churn resilience
 
@@ -85,10 +85,24 @@ for i in range(len(TurnSinceInactive)):
             else:
                 Turn += 1
 
-#print("Churn Resilience of every exiting node: ", ChurnRes, "\n")
+print("Churn Resilience of every exiting node: ", ChurnRes, "\n")
 
 AvgChurnRes = np.mean([Tuple[1] for Tuple in ChurnRes])
 
 print("Average Churn Resilience: ", AvgChurnRes, "\n")
 
+N = len(ChildrenPIDs) + len(Byzantine)
+
 # Compute the Byzantine Resilience
+InitialByzantine = len(Byzantine)
+Compromised = InitialByzantine
+Total = InitialByzantine
+for i in range(len(ViewsList)):
+    for j in range(len(ViewsList[i])):
+        Total += 1
+        Intersection = [k for k in ViewsList[i][j] if k in Byzantine]
+        if len(Intersection) > 0:
+            Compromised += 1
+
+CompromisedPercentage = Compromised / Total
+print("Average number of byzantines: ", CompromisedPercentage, "\n")
