@@ -17,7 +17,7 @@ convalidate_view(ViewReceived, ViewsConvalidated) ->
 %checks if he convalidated lists like that, if equal returns false
 convalidate_view_byzantine([], _) -> false;
 convalidate_view_byzantine([{Pid, _} | T], ByzList) -> 
-    Result  = search(Pid, ByzList),
+    Result  = is_in(Pid, ByzList),
     if
         Result =:= false -> convalidate_view_byzantine(T, ByzList);
         true -> true
@@ -44,5 +44,7 @@ update_convalidated(_, ViewsConvalidated, WhereDuplicate) ->
     {false, NewViewsConvalidated}.
 
 
-    
+is_in(_, []) -> false;
+is_in(Pid, [H | _]) when Pid =:= H ->true;
+is_in(Pid, [_ | T]) -> is_in(Pid, T).
 
