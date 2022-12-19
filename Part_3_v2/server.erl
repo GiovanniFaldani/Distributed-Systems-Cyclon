@@ -18,7 +18,7 @@
 
 % environment setup for the server
 run(N, ViewSize, L, ByzantineProportion, IsVerbose) ->
-    NPeers = N * round((1-ByzantineProportion)),
+    NPeers =  round(N *(1-ByzantineProportion)),
     %#ViewSize = round(0.5*N),
     %L = round(0.3*N),
     %IsVerbose = true,
