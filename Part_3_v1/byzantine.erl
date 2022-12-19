@@ -60,7 +60,7 @@ byz_execution(Server, ByzList, ViewSize, L, PermaList, IsVerbose, Turn, TurnDura
             end,
 
             % BYZ SENDS BACK THE SET OF BYZANTINE NODES
-            PID ! {rep_view, pick_L_elements(ByzList, L), ReqList},
+            PID ! {rep_view, pick_L_elements(ByzList, L), ReqList, self()},
             byz_execution(Server, ByzList, ViewSize, L, PermaList, IsVerbose, Turn, TurnDuration, TotalTurns, IsDone);
 
         {rep_view, _, _} ->

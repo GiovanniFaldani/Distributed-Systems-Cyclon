@@ -96,10 +96,10 @@ peer_execution(Server, PeerList, ViewSize, L, PermaList, IsVerbose, Turn, TurnDu
             % 5 - Q SENDS BACK A SUBSET OF L-1 NODES IN ITS VIEW
 
             ReplyList = pick_L_elements(PeerList, L),
-            PID ! {rep_view, ReplyList, ReqList},
+            PID ! {rep_view, ReplyList, ReqList, self()},
             peer_execution(Server, PeerList, ViewSize, L, PermaList, IsVerbose, Turn, TurnDuration, TotalTurns, IsDone, OldQLists);
 
-        {rep_view, RepList, ReqList} ->
+        {rep_view, RepList, ReqList, Q} ->
             if
                 IsVerbose ->
                     fwrite("~p: Reply from Q \n", [self()]);
@@ -108,7 +108,16 @@ peer_execution(Server, PeerList, ViewSize, L, PermaList, IsVerbose, Turn, TurnDu
             end,
 
             % 6 AND 7 - RECEIVE ENTRIES FROM Q AND UPDATE OWN LIST
-            check_old_lists(RepList, OldQLists),
+            Output = check_old_lists(RepList, OldQLists),
+
+            if
+                Output =:= false ->
+                    DumpedList = filter_list(PeerList, ReqList),
+                    ListWithoutQ = remove_pid_list(Q, DumpedList),
+                    peer_execution(Server, ListWithoutQ, ViewSize, L, PermaList, IsVerbose, Turn, TurnDuration, TotalTurns, true, OldQLists);
+                true ->
+                    pass
+            end,
 
             NewPeerList = update_list(PeerList, RepList, ReqList, ViewSize),
 
